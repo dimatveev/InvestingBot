@@ -1,16 +1,38 @@
-# This is a sample Python script.
+from aiogram import Bot, Dispatcher, executor, types
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from sqlalchemy import create_engine, Column, Integer, String, Float
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
+# Настройка бота
+API_TOKEN = '6723923819:AAG40dPtA-WSi-u_JF2nj2jec9wkr21vRZ0'
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
+dp.middleware.setup(LoggingMiddleware())
 
+# Настройка базы данных
+DATABASE_URL = "sqlite:///users.db"
+engine = create_engine(DATABASE_URL)
+Session = sessionmaker(bind=engine)
+session = Session()
+Base = declarative_base()
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press ⌘F8 to toggle the breakpoint.
+# Определение моделей SQLAlchemy
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String)
 
+class Portfolio(Base):
+    __tablename__ = 'portfolios'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer)
+    balance = Column(Float)
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+# Создание таблиц
+Base.metadata.create_all(engine)
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+# Обработчик команды start
+@dp.message_handler(commands=['start'])
+async def send_welcome(message: types.Message):
+    await message.reply("Привет!")
