@@ -1,8 +1,5 @@
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.dispatcher import FSMContext
-from sqlalchemy import create_engine, Column, Integer, String, Float
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
 from tinkoff.invest import CandleInterval
 from tinkoff.invest.retrying.aio.client import AsyncRetryingClient
 from tinkoff.invest.retrying.settings import RetryClientSettings
@@ -12,33 +9,66 @@ from aiogram import Bot, Dispatcher, executor, types
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 import logging
-import os
-
 from pandas import DataFrame
-
 from tinkoff.invest import Client, SecurityTradingStatus
 from tinkoff.invest.services import InstrumentsService
 from tinkoff.invest.utils import quotation_to_decimal
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 TOKEN = "t.KSwT7xobACNy0ckOlifC8frON0c6g-m-hN2SnScqNaDB6BMyPYfhAWNhv4PHYB925ceVKbg12SmApMgpVF-3dQ"
-# Настройка бота
 API_TOKEN = '6723923819:AAG40dPtA-WSi-u_JF2nj2jec9wkr21vRZ0'
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 dp.middleware.setup(LoggingMiddleware())
 
-# Настройка базы данных
-DATABASE_URL = "sqlite:///users.db"
-engine = create_engine(DATABASE_URL)
-Session = sessionmaker(bind=engine)
-session = Session()
 Base = declarative_base()
 
 
-# Класс состояний для сбора информации от пользователя
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True)
+    portfolios = relationship('Portfolio', back_populates='user')
+    favourites = relationship("FavouriteStock", back_populates="user")
+
+
+class Portfolio(Base):
+    __tablename__ = 'portfolios'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    name = Column(String, nullable=False)
+    user = relationship('User', back_populates='portfolios')
+    favourites = relationship('FavouriteStock', back_populates='portfolio')
+
+
+class FavouriteStock(Base):
+    __tablename__ = 'favourites'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    portfolio_id = Column(Integer, ForeignKey('portfolios.id'), nullable=True)
+    ticker = Column(String, nullable=False)
+    figi = Column(String, nullable=False)
+    portfolio = relationship('Portfolio', back_populates='favourites')
+    user = relationship('User', back_populates='favourites')
+
+
+DATABASE_URL = "sqlite:///db/users.db"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+session = SessionLocal()
+
+
+
+Base.metadata.create_all(engine)
+
+
+
+
 class Form(StatesGroup):
     waiting_for_stock_ticker = State()
+    waiting_for_favorite_stock_ticker = State()
 
 
 logging.basicConfig(format="%(asctime)s %(levelname)s:%(message)s", level=logging.DEBUG)
@@ -46,7 +76,6 @@ logger = logging.getLogger(__name__)
 
 
 def get_figi_by_ticker(ticker, token):
-
     with Client(token) as client:
         instruments: InstrumentsService = client.instruments
         tickers = []
@@ -112,11 +141,13 @@ async def get_stock_command(message: types.Message):
 @dp.message_handler(state=Form.waiting_for_stock_ticker)
 async def get_stock(message: types.Message, state: FSMContext):
     ticker = message.text
-    figi = get_figi_by_ticker(ticker, 't.KSwT7xobACNy0ckOlifC8frON0c6g-m-hN2SnScqNaDB6BMyPYfhAWNhv4PHYB925ceVKbg12SmApMgpVF-3dQ')
+    figi = get_figi_by_ticker(ticker,
+                              't.KSwT7xobACNy0ckOlifC8frON0c6g-m-hN2SnScqNaDB6BMyPYfhAWNhv4PHYB925ceVKbg12SmApMgpVF-3dQ')
     if figi:
         last_candle = await get_stock_candles(figi)
         if last_candle:
-            await message.answer(f"Последняя цена акции {ticker} : {(str(last_candle.close).split(',')[0]).split('=')[1]} руб")
+            await message.answer(
+                f"Последняя цена акции {ticker} : {(str(last_candle.close).split(',')[0]).split('=')[1]} руб")
         else:
             await message.answer("Не удалось получить информацию об акции.")
     else:
@@ -124,25 +155,57 @@ async def get_stock(message: types.Message, state: FSMContext):
     await state.finish()
 
 
-# Запуск бота
-class User(Base):
-    __tablename__ = 'users'
-    id = Column(Integer, primary_key=True)
-    username = Column(String)
+@dp.message_handler(commands=['addfavourite'], state='*')
+async def add_favourite_command(message: types.Message):
+    await Form.waiting_for_favorite_stock_ticker.set()
+    await message.reply("Введите тикер акции, которую хотите добавить в избранное:")
 
 
-class Portfolio(Base):
-    __tablename__ = 'portfolios'
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer)
-    balance = Column(Float)
+@dp.message_handler(state=Form.waiting_for_favorite_stock_ticker)
+async def add_stock_to_favourites(message: types.Message, state: FSMContext):
+    ticker = message.text.upper()
+    figi = get_figi_by_ticker(ticker, TOKEN)
+    if figi is None:
+        await message.answer(f"Не удалось найти акцию с тикером: {ticker}.")
+        await state.finish()
+        return
+
+    try:
+        user_id = message.from_user.id
+        user = session.query(User).filter(User.id == user_id).first()
+        if not user:
+            user = User(id=user_id, username=message.from_user.username)
+            session.add(user)
+            session.commit()
+
+        new_favourite = FavouriteStock(user_id=user.id, ticker=ticker, figi=figi)
+        session.add(new_favourite)
+        session.commit()
+        await message.answer(f"Акция {ticker} добавлена в избранное.")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении акции в избранное: {e}")
+        await message.answer("Произошла ошибка при добавлении акции в избранное.")
+
+    await state.finish()
 
 
-# Создание таблиц
-Base.metadata.create_all(engine)
+@dp.message_handler(commands=['myfavourites'])
+async def show_favourites(message: types.Message):
+    user_id = message.from_user.id
+    user_favourites = session.query(FavouriteStock).filter(FavouriteStock.user_id == user_id).all()
+    if not user_favourites:
+        await message.answer("В вашем списке избранного пока нет акций.")
+        return
+
+    for favourite in user_favourites:
+        last_candle = await get_stock_candles(favourite.figi)
+        if last_candle:
+            price = (str(last_candle.close).split(',')[0]).split('=')[1]
+            await message.answer(f"{favourite.ticker}: {price} руб")
+        else:
+            await message.answer(f"Не удалось получить информацию об акции {favourite.ticker}.")
 
 
-# Обработчики команд
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
     await message.reply("Привет! Я твой инвестиционный бот. Вот что я могу делать...")
@@ -153,8 +216,5 @@ async def send_help(message: types.Message):
     await message.reply("Список команд: /start, /help, /portfolio...")
 
 
-# Здесь можно добавить больше обработчиков для разных команд
-
-# Функция, которая запускает polling
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
