@@ -15,6 +15,7 @@ from tinkoff.invest.services import InstrumentsService
 from tinkoff.invest.utils import quotation_to_decimal
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 TOKEN = "t.KSwT7xobACNy0ckOlifC8frON0c6g-m-hN2SnScqNaDB6BMyPYfhAWNhv4PHYB925ceVKbg12SmApMgpVF-3dQ"
 API_TOKEN = '6723923819:AAG40dPtA-WSi-u_JF2nj2jec9wkr21vRZ0'
@@ -132,7 +133,7 @@ async def get_stock_candles(figi):
 @dp.message_handler(commands=['getstock'], state='*')
 async def get_stock_command(message: types.Message):
     await Form.waiting_for_stock_ticker.set()
-    await message.reply("Введите тикер акции:")
+    await message.reply("🔍 Введите тикер акции, чтобы узнать текущую цену:")
 
 
 @dp.message_handler(state=Form.waiting_for_stock_ticker)
@@ -144,18 +145,18 @@ async def get_stock(message: types.Message, state: FSMContext):
         last_candle = await get_stock_candles(figi)
         if last_candle:
             await message.answer(
-                f"Последняя цена акции {ticker} : {(str(last_candle.close).split(',')[0]).split('=')[1]} руб")
+                f"📈 Последняя цена акции {ticker}: {(str(last_candle.close).split(',')[0]).split('=')[1]} руб")
         else:
-            await message.answer("Не удалось получить информацию об акции.")
+            await message.answer("😕 Не удалось получить информацию об акции.")
     else:
-        await message.answer("Не удалось найти акцию с таким тикером.")
+        await message.answer("😢 Не удалось найти акцию с таким тикером.")
     await state.finish()
 
 
 @dp.message_handler(commands=['addfavorite'], state='*')
 async def add_favorite_command(message: types.Message):
     await Form.waiting_for_favorite_stock_ticker.set()
-    await message.reply("Введите тикер акции, которую хотите добавить в избранное:")
+    await message.reply("💖 Введите тикер акции для добавления в избранное:")
 
 
 @dp.message_handler(state=Form.waiting_for_favorite_stock_ticker)
@@ -163,7 +164,7 @@ async def add_stock_to_favorites(message: types.Message, state: FSMContext):
     ticker = message.text.upper()
     figi = get_figi_by_ticker(ticker, TOKEN)
     if figi is None:
-        await message.answer(f"Не удалось найти акцию с тикером: {ticker}.")
+        await message.answer(f"🤔 Не удалось найти акцию с тикером: {ticker}.")
         await state.finish()
         return
 
@@ -178,10 +179,10 @@ async def add_stock_to_favorites(message: types.Message, state: FSMContext):
         new_favorite = FavoriteStock(user_id=user.id, ticker=ticker, figi=figi)
         session.add(new_favorite)
         session.commit()
-        await message.answer(f"Акция {ticker} добавлена в избранное.")
+        await message.answer(f"✅ Акция {ticker} добавлена в избранное.")
     except Exception as e:
-        logger.error(f"Ошибка при добавлении акции в избранное: {e}")
-        await message.answer("Произошла ошибка при добавлении акции в избранное.")
+        logger.error(f"❌ Ошибка при добавлении акции в избранное: {e}")
+        await message.answer("🚫 Произошла ошибка при добавлении акции в избранное.")
 
     await state.finish()
 
@@ -189,7 +190,7 @@ async def add_stock_to_favorites(message: types.Message, state: FSMContext):
 @dp.message_handler(commands=['deletefavorite'], state='*')
 async def delete_favorite_command(message: types.Message):
     await Form.waiting_for_favorite_stock_to_delete_ticker.set()
-    await message.reply("Введите тикер акции, которую хотите удалить из избранного:")
+    await message.reply("🗑️ Введите тикер акции для удаления из избранного:")
 
 
 @dp.message_handler(state=Form.waiting_for_favorite_stock_to_delete_ticker)
@@ -198,7 +199,6 @@ async def delete_stock_from_favorites(message: types.Message, state: FSMContext)
     user_id = message.from_user.id
 
     try:
-        # Найти акцию в избранном
         favorite_stock = session.query(FavoriteStock).filter(
             FavoriteStock.user_id == user_id,
             FavoriteStock.ticker == ticker
@@ -207,13 +207,12 @@ async def delete_stock_from_favorites(message: types.Message, state: FSMContext)
         if favorite_stock:
             session.delete(favorite_stock)
             session.commit()
-            await message.answer(f"Акция {ticker} удалена из избранного.")
+            await message.answer(f"🗑️ Акция {ticker} удалена из избранного.")
         else:
-            await message.answer(f"Акция {ticker} не найдена в вашем списке избранного.")
-
+            await message.answer(f"🤷‍♂️ Акция {ticker} не найдена в вашем списке избранного.")
     except Exception as e:
-        logger.error(f"Ошибка при удалении акции из избранного: {e}")
-        await message.answer("Произошла ошибка при удалении акции из избранного.")
+        logger.error(f"❌ Ошибка при удалении акции из избранного: {e}")
+        await message.answer("🚫 Произошла ошибка при удалении акции из избранного.")
 
     await state.finish()
 
@@ -223,21 +222,33 @@ async def show_favorites(message: types.Message):
     user_id = message.from_user.id
     user_favorites = session.query(FavoriteStock).filter(FavoriteStock.user_id == user_id).all()
     if not user_favorites:
-        await message.answer("В вашем списке избранного пока нет акций.")
+        await message.answer("💔 В вашем списке избранного пока нет акций.")
         return
 
+    response = "💖 Ваш список избранных акций:\n"
     for favorite in user_favorites:
         last_candle = await get_stock_candles(favorite.figi)
         if last_candle:
             price = (str(last_candle.close).split(',')[0]).split('=')[1]
-            await message.answer(f"{favorite.ticker}: {price} руб")
+            response += f"- {favorite.ticker}: {price} руб\n"
         else:
-            await message.answer(f"Не удалось получить информацию об акции {favorite.ticker}.")
+            response += f"- {favorite.ticker}: Нет данных о цене\n"
+
+    await message.answer(response)
 
 
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
-    await message.reply("Привет! Я твой инвестиционный бот. Вот что я могу делать...")
+    await message.answer(
+        "Привет! Я твой инвестиционный бот 📈. Вот что я могу делать:\n"
+        "🔍 Получить котировки - узнать актуальные котировки акций\n"
+        "💖 Добавить в избранное - добавить акцию в список избранных\n"
+        "🗑️ Удалить из избранного - удалить акцию из избранного\n"
+        "💔 Показать избранное - посмотреть список избранных акций\n"
+        "ℹ️ Помощь - получить информацию о работе бота\n\n"
+        "Выберите нужное действие из меню ниже:",
+        reply_markup=get_main_keyboard()
+    )
 
 
 @dp.message_handler(commands=['help'])
@@ -245,8 +256,9 @@ async def send_help(message: types.Message):
     help_text = (
         "Привет! Я твой инвестиционный помощник-бот. Вот что я могу делать:\n\n"
         "/start - начать работу с ботом и получить приветственное сообщение.\n"
+        "/menu - вызов удобной клавиатуры чтобы легче оперировать командами. \n"
         "/help - получить информацию о доступных командах и их использовании.\n"
-        "/getstock - получить текущую цену акции. После ввода команды, отправьте тикер акции, например 'AAPL' для Apple.\n"
+        "/getstock - получить текущую цену акции. После ввода команды, отправьте тикер акции, например 'YNDX' для Yandex.\n"
         "/addfavorite - добавить акцию в список избранных. После ввода команды, отправьте тикер акции, которую хотите добавить.\n"
         "/myfavorites - просмотреть ваш список избранных акций и их текущие цены.\n"
         "/deletefavorite - удалить акцию из списка избранных. После ввода команды, отправьте тикер акции для удаления.\n\n"
@@ -254,6 +266,34 @@ async def send_help(message: types.Message):
     )
 
     await message.reply(help_text)
+
+
+@dp.message_handler(commands=['menu'])
+async def show_menu(message: types.Message):
+    await message.answer(
+        "Выберите действие из меню ниже:",
+        reply_markup=get_main_keyboard()
+    )
+
+
+@dp.message_handler(
+    lambda message: message.text in ["🔍 Получить котировки", "💖 Добавить в избранное", "🗑️ Удалить из избранного",
+                                     "💔 Показать избранное", "ℹ️ Помощь"])
+async def handle_keyboard_commands(message: types.Message):
+    if message.text == "🔍 Получить котировки":
+        await get_stock_command(message)
+    elif message.text == "💖 Добавить в избранное":
+        await add_favorite_command(message)
+
+
+def get_main_keyboard():
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton("🔍 Получить котировки"))
+    keyboard.add(KeyboardButton("💖 Добавить в избранное"))
+    keyboard.add(KeyboardButton("🗑️ Удалить из избранного"))
+    keyboard.add(KeyboardButton("💔 Показать избранное"))
+    keyboard.add(KeyboardButton("ℹ️ Помощь"))
+    return keyboard
 
 
 if __name__ == '__main__':
