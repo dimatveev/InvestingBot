@@ -21,7 +21,7 @@ with sqlite3.connect('/Users/dmitriimatveev/PycharmProjects/InvestingBot/db/user
     ''')
 
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS favourites (
+    CREATE TABLE IF NOT EXISTS favorites (
         id INTEGER PRIMARY KEY,
         user_id INTEGER NOT NULL,
         portfolio_id INTEGER NOT NULL,

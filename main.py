@@ -31,7 +31,7 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     username = Column(String, unique=True)
     portfolios = relationship('Portfolio', back_populates='user')
-    favourites = relationship("FavouriteStock", back_populates="user")
+    favorites = relationship("FavoriteStock", back_populates="user")
 
 
 class Portfolio(Base):
@@ -40,18 +40,18 @@ class Portfolio(Base):
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     name = Column(String, nullable=False)
     user = relationship('User', back_populates='portfolios')
-    favourites = relationship('FavouriteStock', back_populates='portfolio')
+    favorites = relationship('FavoriteStock', back_populates='portfolio')
 
 
-class FavouriteStock(Base):
-    __tablename__ = 'favourites'
+class FavoriteStock(Base):
+    __tablename__ = 'favorites'
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     portfolio_id = Column(Integer, ForeignKey('portfolios.id'), nullable=True)
     ticker = Column(String, nullable=False)
     figi = Column(String, nullable=False)
-    portfolio = relationship('Portfolio', back_populates='favourites')
-    user = relationship('User', back_populates='favourites')
+    portfolio = relationship('Portfolio', back_populates='favorites')
+    user = relationship('User', back_populates='favorites')
 
 
 DATABASE_URL = "sqlite:///db/users.db"
@@ -59,16 +59,13 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 session = SessionLocal()
 
-
-
 Base.metadata.create_all(engine)
-
-
 
 
 class Form(StatesGroup):
     waiting_for_stock_ticker = State()
     waiting_for_favorite_stock_ticker = State()
+    waiting_for_favorite_stock_to_delete_ticker = State()
 
 
 logging.basicConfig(format="%(asctime)s %(levelname)s:%(message)s", level=logging.DEBUG)
@@ -155,14 +152,14 @@ async def get_stock(message: types.Message, state: FSMContext):
     await state.finish()
 
 
-@dp.message_handler(commands=['addfavourite'], state='*')
-async def add_favourite_command(message: types.Message):
+@dp.message_handler(commands=['addfavorite'], state='*')
+async def add_favorite_command(message: types.Message):
     await Form.waiting_for_favorite_stock_ticker.set()
     await message.reply("Введите тикер акции, которую хотите добавить в избранное:")
 
 
 @dp.message_handler(state=Form.waiting_for_favorite_stock_ticker)
-async def add_stock_to_favourites(message: types.Message, state: FSMContext):
+async def add_stock_to_favorites(message: types.Message, state: FSMContext):
     ticker = message.text.upper()
     figi = get_figi_by_ticker(ticker, TOKEN)
     if figi is None:
@@ -178,8 +175,8 @@ async def add_stock_to_favourites(message: types.Message, state: FSMContext):
             session.add(user)
             session.commit()
 
-        new_favourite = FavouriteStock(user_id=user.id, ticker=ticker, figi=figi)
-        session.add(new_favourite)
+        new_favorite = FavoriteStock(user_id=user.id, ticker=ticker, figi=figi)
+        session.add(new_favorite)
         session.commit()
         await message.answer(f"Акция {ticker} добавлена в избранное.")
     except Exception as e:
@@ -189,21 +186,53 @@ async def add_stock_to_favourites(message: types.Message, state: FSMContext):
     await state.finish()
 
 
-@dp.message_handler(commands=['myfavourites'])
-async def show_favourites(message: types.Message):
+@dp.message_handler(commands=['deletefavorite'], state='*')
+async def delete_favorite_command(message: types.Message):
+    await Form.waiting_for_favorite_stock_to_delete_ticker.set()
+    await message.reply("Введите тикер акции, которую хотите удалить из избранного:")
+
+
+@dp.message_handler(state=Form.waiting_for_favorite_stock_to_delete_ticker)
+async def delete_stock_from_favorites(message: types.Message, state: FSMContext):
+    ticker = message.text.upper()
     user_id = message.from_user.id
-    user_favourites = session.query(FavouriteStock).filter(FavouriteStock.user_id == user_id).all()
-    if not user_favourites:
+
+    try:
+        # Найти акцию в избранном
+        favorite_stock = session.query(FavoriteStock).filter(
+            FavoriteStock.user_id == user_id,
+            FavoriteStock.ticker == ticker
+        ).first()
+
+        if favorite_stock:
+            session.delete(favorite_stock)
+            session.commit()
+            await message.answer(f"Акция {ticker} удалена из избранного.")
+        else:
+            await message.answer(f"Акция {ticker} не найдена в вашем списке избранного.")
+
+    except Exception as e:
+        logger.error(f"Ошибка при удалении акции из избранного: {e}")
+        await message.answer("Произошла ошибка при удалении акции из избранного.")
+
+    await state.finish()
+
+
+@dp.message_handler(commands=['myfavorites'])
+async def show_favorites(message: types.Message):
+    user_id = message.from_user.id
+    user_favorites = session.query(FavoriteStock).filter(FavoriteStock.user_id == user_id).all()
+    if not user_favorites:
         await message.answer("В вашем списке избранного пока нет акций.")
         return
 
-    for favourite in user_favourites:
-        last_candle = await get_stock_candles(favourite.figi)
+    for favorite in user_favorites:
+        last_candle = await get_stock_candles(favorite.figi)
         if last_candle:
             price = (str(last_candle.close).split(',')[0]).split('=')[1]
-            await message.answer(f"{favourite.ticker}: {price} руб")
+            await message.answer(f"{favorite.ticker}: {price} руб")
         else:
-            await message.answer(f"Не удалось получить информацию об акции {favourite.ticker}.")
+            await message.answer(f"Не удалось получить информацию об акции {favorite.ticker}.")
 
 
 @dp.message_handler(commands=['start'])
@@ -213,7 +242,18 @@ async def send_welcome(message: types.Message):
 
 @dp.message_handler(commands=['help'])
 async def send_help(message: types.Message):
-    await message.reply("Список команд: /start, /help, /portfolio...")
+    help_text = (
+        "Привет! Я твой инвестиционный помощник-бот. Вот что я могу делать:\n\n"
+        "/start - начать работу с ботом и получить приветственное сообщение.\n"
+        "/help - получить информацию о доступных командах и их использовании.\n"
+        "/getstock - получить текущую цену акции. После ввода команды, отправьте тикер акции, например 'AAPL' для Apple.\n"
+        "/addfavorite - добавить акцию в список избранных. После ввода команды, отправьте тикер акции, которую хотите добавить.\n"
+        "/myfavorites - просмотреть ваш список избранных акций и их текущие цены.\n"
+        "/deletefavorite - удалить акцию из списка избранных. После ввода команды, отправьте тикер акции для удаления.\n\n"
+        "Если у вас возникнут вопросы или предложения, не стесняйтесь обращаться!"
+    )
+
+    await message.reply(help_text)
 
 
 if __name__ == '__main__':
