@@ -284,6 +284,12 @@ async def handle_keyboard_commands(message: types.Message):
         await get_stock_command(message)
     elif message.text == "💖 Добавить в избранное":
         await add_favorite_command(message)
+    elif message.text == "🗑️ Удалить из избранного":
+        await delete_favorite_command(message)
+    elif message.text == "💔 Показать избранное":
+        await show_favorites(message)
+    elif message.text == "ℹ️ Помощь":
+        await send_help(message)
 
 
 def get_main_keyboard():
