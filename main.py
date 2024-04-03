@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-TOKEN = "t.KSwT7xobACNy0ckOlifC8frON0c6g-m-hN2SnScqNaDB6BMyPYfhAWNhv4PHYB925ceVKbg12SmApMgpVF-3dQ"
+TOKEN = "" #введите свой тинькофф апи
 API_TOKEN = '6723923819:AAG40dPtA-WSi-u_JF2nj2jec9wkr21vRZ0'
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
