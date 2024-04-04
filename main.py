@@ -18,7 +18,7 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 TOKEN = "" #введите свой тинькофф апи
-API_TOKEN = '6723923819:AAG40dPtA-WSi-u_JF2nj2jec9wkr21vRZ0'
+API_TOKEN = '' #введите свой telegram api
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
